@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VR Paint Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.4.2/aframe.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; font-family:'Segoe UI',sans-serif; }
+  #overlay {
+    position:fixed; inset:0; z-index:9999;
+    background:radial-gradient(ellipse at 50% 30%, #1a0a2e 0%, #000 70%);
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    gap:16px; color:#fff; text-align:center; padding:24px;
+  }
+  #overlay h1 { font-size:2.6rem; color:#a78bfa; letter-spacing:4px; text-transform:uppercase; text-shadow:0 0 30px rgba(167,139,250,0.6); }
+  #overlay .sub { color:#888; font-size:.85rem; letter-spacing:3px; text-transform:uppercase; margin-top:-10px; }
+  #overlay .desc { color:#bbb; font-size:.95rem; max-width:460px; line-height:1.8; }
+  .ctrl-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; text-align:left; max-width:420px; margin:4px 0; }
+  .ctrl-grid .k { color:#a78bfa; font-weight:bold; font-size:.85rem; }
+  .ctrl-grid .v { color:#999; font-size:.85rem; }
+  #enter-btn {
+    background:linear-gradient(135deg,#7c3aed,#a855f7); color:#fff; border:none;
+    padding:14px 52px; font-size:1.1rem; letter-spacing:3px; text-transform:uppercase;
+    cursor:pointer; border-radius:8px; box-shadow:0 0 28px rgba(124,58,237,0.5);
+    transition:all .2s; margin-top:8px;
+  }
+  #enter-btn:hover { box-shadow:0 0 40px rgba(168,85,247,0.7); transform:translateY(-2px); }
+  .tip { color:#555; font-size:.8rem; }
+  a-scene { display:none; }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>🎨 VR Paint Studio</h1>
+  <div class="sub">Oculus Quest · WebXR</div>
+  <div class="desc">Point your controller at the canvas and hold Trigger to paint. Use the palette panel on the left to switch colors and brush sizes.</div>
+  <div class="ctrl-grid">
+    <span class="k">Trigger (hold)</span><span class="v">Paint strokes</span>
+    <span class="k">Grip</span><span class="v">Cycle brush size</span>
+    <span class="k">B Button</span><span class="v">Undo last stroke</span>
+    <span class="k">A Button</span><span class="v">Clear canvas</span>
+    <span class="k">Left Laser</span><span class="v">Select color/size</span>
+    <span class="k">Right Stick</span><span class="v">Move around</span>
+  </div>
+  <div class="tip">Desktop: WASD to move · Mouse-click canvas to paint · Z=undo · C=clear · 1-4=brush size</div>
+  <button id="enter-btn" onclick="enterStudio()">ENTER STUDIO</button>
+</div>
+
+<a-scene id="main-scene"
+  webxr="requiredFeatures: local-floor; optionalFeatures: bounded-floor, hand-tracking"
+  renderer="antialias: true; colorManagement: true"
+  background="color: #080810"
+  vr-mode-ui="enabled: true"
+  canvas-texture-updater>
+
+  <a-assets timeout="10000">
+    <canvas id="paintCanvas" width="1024" height="1024"></canvas>
+  </a-assets>
+
+  <!-- ═══ ENVIRONMENT ═══ -->
+  <!-- Floor -->
+  <a-plane rotation="-90 0 0" width="24" height="24" material="color:#12122a; roughness:1; metalness:0"></a-plane>
+
+  <!-- Floor grid lines -->
+  <a-entity rotation="-90 0 0" position="0 0.002 0">
+    <a-plane width="24" height="0.02" position="0 -6 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0 -4 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0 -2 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0  0 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0  2 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0  4 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+    <a-plane width="24" height="0.02" position="0  6 0"  material="color:#2a2a50; opacity:0.5; transparent:true"></a-plane>
+  </a-entity>
+
+  <!-- Walls -->
+  <a-plane position="0 3 -7"  width="24" height="8" material="color:#0e0e22; roughness:1"></a-plane>
+  <a-plane position="0 3  7"  rotation="0 180 0" width="24" height="8" material="color:#0c0c1e; roughness:1"></a-plane>
+  <a-plane position="-7 3 0"  rotation="0  90 0" width="14" height="8" material="color:#0d0d20; roughness:1"></a-plane>
+  <a-plane position=" 7 3 0"  rotation="0 -90 0" width="14" height="8" material="color:#0d0d20; roughness:1"></a-plane>
+  <!-- Ceiling -->
+  <a-plane position="0 6 0"   rotation="90 0 0"  width="24" height="24" material="color:#0a0a18; roughness:1"></a-plane>
+
+  <!-- Lights -->
+  <a-light type="ambient"  color="#1e1e3a" intensity="1.2"></a-light>
+  <a-light type="point" position="0 5 -1"  color="#ffffff" intensity="1.8" distance="10" decay="2"></a-light>
+  <a-light type="point" position="-3 5 1"  color="#8877ff" intensity="0.7" distance="8"  decay="2"></a-light>
+  <a-light type="point" position=" 3 5 1"  color="#ffcc88" intensity="0.5" distance="8"  decay="2"></a-light>
+  <a-light type="point" position="0 4 -2.5" color="#ffffff" intensity="0.9" distance="5" decay="2"></a-light>
+
+  <!-- Ceiling fixtures -->
+  <a-cylinder position="0 6 -1"  radius="0.18" height="0.1" material="color:#fff; emissive:#fff; emissiveIntensity:1"></a-cylinder>
+  <a-cylinder position="-3 6 1"  radius="0.12" height="0.08" material="color:#fff; emissive:#8877ff; emissiveIntensity:1"></a-cylinder>
+  <a-cylinder position=" 3 6 1"  radius="0.12" height="0.08" material="color:#fff; emissive:#ffcc88; emissiveIntensity:1"></a-cylinder>
+
+  <!-- ═══ MAIN PAINTING CANVAS ═══ -->
+  <a-entity id="easel-group" position="0 1.6 -3">
+    <!-- Frame back -->
+    <a-box width="2.3" height="2.3" depth="0.05" position="0 0 -0.01"
+      material="color:#2a1a08; roughness:0.85; metalness:0.15"></a-box>
+    <!-- THE PAINT SURFACE — this is what you paint on -->
+    <a-plane id="canvas-surface"
+      width="2" height="2"
+      position="0 0 0.035"
+      material="src: #paintCanvas; shader: flat; npot: true; repeat: 1 1; minFilter: linearMipMapLinearFilter; magFilter: linearFilter"
+      class="paintable">
+    </a-plane>
+    <!-- Frame moulding -->
+    <a-box width="2.36" height="0.07" depth="0.1" position="0  1.17 0" material="color:#3d2910; roughness:0.7; metalness:0.35"></a-box>
+    <a-box width="2.36" height="0.07" depth="0.1" position="0 -1.17 0" material="color:#3d2910; roughness:0.7; metalness:0.35"></a-box>
+    <a-box width="0.07" height="2.36" depth="0.1" position=" 1.17 0 0" material="color:#3d2910; roughness:0.7; metalness:0.35"></a-box>
+    <a-box width="0.07" height="2.36" depth="0.1" position="-1.17 0 0" material="color:#3d2910; roughness:0.7; metalness:0.35"></a-box>
+    <!-- Easel legs -->
+    <a-box width="0.055" height="1.6" depth="0.055" position="-0.85 -1.9 0.25" rotation="12 0 0"  material="color:#5a3a18"></a-box>
+    <a-box width="0.055" height="1.6" depth="0.055" position=" 0.85 -1.9 0.25" rotation="12 0 0"  material="color:#5a3a18"></a-box>
+    <a-box width="0.055" height="1.6" depth="0.055" position="0    -1.9 -0.1"  rotation="-8 0 0"  material="color:#5a3a18"></a-box>
+    <a-box width="1.7"   height="0.045" depth="0.045" position="0 -1.15 0.18"  material="color:#6a4820"></a-box>
+  </a-entity>
+
+  <!-- ═══ PALETTE PANEL ═══ -->
+  <a-entity id="palette" position="-2.1 1.5 -2.2" rotation="0 28 0">
+    <!-- Background panel -->
+    <a-box width="0.62" height="1.72" depth="0.035"
+      material="color:#13132a; roughness:0.9; metalness:0.2; opacity:0.97; transparent:true"></a-box>
+
+    <!-- Title -->
+    <a-text value="PALETTE" position="0 0.77 0.022" align="center" color="#a78bfa" width="1.4" font="mozillavr"></a-text>
+
+    <!-- ── COLOR SWATCHES 4×6 ── -->
+    <!-- Row 1: neutrals -->
+    <a-box class="color-swatch" id="col-white"   width="0.11" height="0.11" depth="0.028" position="-0.195 0.60 0.022" material="color:#ffffff; emissive:#ffffff; emissiveIntensity:0.25"></a-box>
+    <a-box class="color-swatch" id="col-ltgray"  width="0.11" height="0.11" depth="0.028" position="-0.065 0.60 0.022" material="color:#aaaaaa; emissive:#aaaaaa; emissiveIntensity:0.15"></a-box>
+    <a-box class="color-swatch" id="col-gray"    width="0.11" height="0.11" depth="0.028" position=" 0.065 0.60 0.022" material="color:#555555; emissive:#555555; emissiveIntensity:0.15"></a-box>
+    <a-box class="color-swatch" id="col-black"   width="0.11" height="0.11" depth="0.028" position=" 0.195 0.60 0.022" material="color:#111111; emissive:#222222; emissiveIntensity:0.1"></a-box>
+    <!-- Row 2: reds/oranges -->
+    <a-box class="color-swatch" id="col-red"     width="0.11" height="0.11" depth="0.028" position="-0.195 0.46 0.022" material="color:#ff2222; emissive:#ff2222; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-orange"  width="0.11" height="0.11" depth="0.028" position="-0.065 0.46 0.022" material="color:#ff8800; emissive:#ff8800; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-yellow"  width="0.11" height="0.11" depth="0.028" position=" 0.065 0.46 0.022" material="color:#ffee00; emissive:#ffee00; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-lime"    width="0.11" height="0.11" depth="0.028" position=" 0.195 0.46 0.022" material="color:#aaff00; emissive:#aaff00; emissiveIntensity:0.5"></a-box>
+    <!-- Row 3: greens -->
+    <a-box class="color-swatch" id="col-green"   width="0.11" height="0.11" depth="0.028" position="-0.195 0.32 0.022" material="color:#00cc44; emissive:#00cc44; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-teal"    width="0.11" height="0.11" depth="0.028" position="-0.065 0.32 0.022" material="color:#00bbaa; emissive:#00bbaa; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-cyan"    width="0.11" height="0.11" depth="0.028" position=" 0.065 0.32 0.022" material="color:#00ddff; emissive:#00ddff; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-sky"     width="0.11" height="0.11" depth="0.028" position=" 0.195 0.32 0.022" material="color:#44aaff; emissive:#44aaff; emissiveIntensity:0.5"></a-box>
+    <!-- Row 4: blues -->
+    <a-box class="color-swatch" id="col-blue"    width="0.11" height="0.11" depth="0.028" position="-0.195 0.18 0.022" material="color:#2255ff; emissive:#2255ff; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-indigo"  width="0.11" height="0.11" depth="0.028" position="-0.065 0.18 0.022" material="color:#4422cc; emissive:#4422cc; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-violet"  width="0.11" height="0.11" depth="0.028" position=" 0.065 0.18 0.022" material="color:#8822ff; emissive:#8822ff; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-purple"  width="0.11" height="0.11" depth="0.028" position=" 0.195 0.18 0.022" material="color:#cc44ff; emissive:#cc44ff; emissiveIntensity:0.5"></a-box>
+    <!-- Row 5: pinks/reds -->
+    <a-box class="color-swatch" id="col-pink"    width="0.11" height="0.11" depth="0.028" position="-0.195 0.04 0.022" material="color:#ff44bb; emissive:#ff44bb; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-hotpink" width="0.11" height="0.11" depth="0.028" position="-0.065 0.04 0.022" material="color:#ff0080; emissive:#ff0080; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-rose"    width="0.11" height="0.11" depth="0.028" position=" 0.065 0.04 0.022" material="color:#ffaabb; emissive:#ffaabb; emissiveIntensity:0.4"></a-box>
+    <a-box class="color-swatch" id="col-brown"   width="0.11" height="0.11" depth="0.028" position=" 0.195 0.04 0.022" material="color:#884422; emissive:#884422; emissiveIntensity:0.3"></a-box>
+    <!-- Row 6: specials -->
+    <a-box class="color-swatch" id="col-tan"     width="0.11" height="0.11" depth="0.028" position="-0.195 -0.10 0.022" material="color:#cc9966; emissive:#cc9966; emissiveIntensity:0.3"></a-box>
+    <a-box class="color-swatch" id="col-gold"    width="0.11" height="0.11" depth="0.028" position="-0.065 -0.10 0.022" material="color:#ffcc00; emissive:#ffcc00; emissiveIntensity:0.5"></a-box>
+    <a-box class="color-swatch" id="col-silver"  width="0.11" height="0.11" depth="0.028" position=" 0.065 -0.10 0.022" material="color:#c0c8d8; emissive:#c0c8d8; emissiveIntensity:0.3"></a-box>
+    <a-box class="color-swatch" id="col-neon"    width="0.11" height="0.11" depth="0.028" position=" 0.195 -0.10 0.022" material="color:#39ff14; emissive:#39ff14; emissiveIntensity:0.9"></a-box>
+
+    <!-- Divider line -->
+    <a-box width="0.52" height="0.008" depth="0.008" position="0 -0.22 0.022" material="color:#33335a"></a-box>
+
+    <!-- BRUSH SIZE label -->
+    <a-text value="BRUSH SIZE" position="0 -0.30 0.022" align="center" color="#a78bfa" width="1.1" font="mozillavr"></a-text>
+
+    <!-- Size buttons -->
+    <a-sphere id="size-sm"  radius="0.028" position="-0.19 -0.42 0.03" material="color:#ddd; emissive:#fff; emissiveIntensity:0.5" class="color-swatch"></a-sphere>
+    <a-sphere id="size-md"  radius="0.044" position="-0.07 -0.42 0.03" material="color:#ddd; emissive:#fff; emissiveIntensity:0.5" class="color-swatch"></a-sphere>
+    <a-sphere id="size-lg"  radius="0.062" position=" 0.07 -0.42 0.03" material="color:#ddd; emissive:#fff; emissiveIntensity:0.5" class="color-swatch"></a-sphere>
+    <a-sphere id="size-xl"  radius="0.085" position=" 0.20 -0.42 0.03" material="color:#ddd; emissive:#fff; emissiveIntensity:0.5" class="color-swatch"></a-sphere>
+
+    <!-- Divider -->
+    <a-box width="0.52" height="0.008" depth="0.008" position="0 -0.56 0.022" material="color:#33335a"></a-box>
+
+    <!-- UNDO button -->
+    <a-box id="btn-undo" width="0.46" height="0.12" depth="0.04" position="0 -0.66 0.022"
+      material="color:#3b2c6a; emissive:#3b2c6a; emissiveIntensity:0.4; roughness:0.6" class="color-swatch">
+    </a-box>
+    <a-text value="UNDO  (B)" position="0 -0.66 0.046" align="center" color="#c4b5fd" width="1.1" font="mozillavr"></a-text>
+
+    <!-- CLEAR button -->
+    <a-box id="btn-clear" width="0.46" height="0.12" depth="0.04" position="0 -0.81 0.022"
+      material="color:#6a1a1a; emissive:#6a1a1a; emissiveIntensity:0.4; roughness:0.6" class="color-swatch">
+    </a-box>
+    <a-text value="CLEAR  (A)" position="0 -0.81 0.046" align="center" color="#fca5a5" width="1.1" font="mozillavr"></a-text>
+
+    <!-- Active colour preview -->
+    <a-text value="ACTIVE COLOR" position="0 -0.94 0.022" align="center" color="#666" width="0.9" font="mozillavr"></a-text>
+    <a-box id="color-preview" width="0.46" height="0.10" depth="0.04" position="0 -1.04 0.022"
+      material="color:#ff2222; emissive:#ff2222; emissiveIntensity:0.7">
+    </a-box>
+  </a-entity>
+
+  <!-- Brush tip sphere (follows controller) -->
+  <a-sphere id="brush-tip" radius="0.018"
+    material="color:#ff2222; emissive:#ff2222; emissiveIntensity:0.9; opacity:0.85; transparent:true"
+    visible="false">
+  </a-sphere>
+
+  <!-- ═══ STUDIO PROPS ═══ -->
+  <!-- Side table -->
+  <a-box position="-3.0 0.78 -1.5" width="0.7" height="0.06" depth="0.7" material="color:#5a3a18; roughness:0.8"></a-box>
+  <a-box position="-2.72 0.37 -1.22" width="0.06" height="0.76" depth="0.06" material="color:#4a2a0a"></a-box>
+  <a-box position="-3.28 0.37 -1.22" width="0.06" height="0.76" depth="0.06" material="color:#4a2a0a"></a-box>
+  <a-box position="-2.72 0.37 -1.78" width="0.06" height="0.76" depth="0.06" material="color:#4a2a0a"></a-box>
+  <a-box position="-3.28 0.37 -1.78" width="0.06" height="0.76" depth="0.06" material="color:#4a2a0a"></a-box>
+  <!-- Paint jar -->
+  <a-cylinder position="-3.0 0.93 -1.4" radius="0.08" height="0.22" material="color:#2244aa; opacity:0.65; transparent:true"></a-cylinder>
+  <!-- Brushes in jar -->
+  <a-cylinder position="-2.96 1.12 -1.38" radius="0.012" height="0.38" material="color:#8B4513"></a-cylinder>
+  <a-cylinder position="-3.04 1.10 -1.42" radius="0.011" height="0.35" material="color:#6B3410"></a-cylinder>
+
+  <!-- Wall art sign -->
+  <a-plane position="-2.2 2.4 -6.98" width="1.2" height="0.8" material="color:#1a1030; roughness:0.9"></a-plane>
+  <a-text value="VR PAINT\nSTUDIO" position="-2.2 2.4 -6.95" align="center" color="#a78bfa" width="3.2" font="mozillavr"></a-text>
+
+  <!-- Floating dust/sparkles near canvas -->
+  <a-sphere radius="0.009" position="0.9 2.4 -2.9" material="color:#a78bfa; emissive:#a78bfa; emissiveIntensity:1; opacity:0.6; transparent:true"
+    animation="property:position; from:0.9 2.4 -2.9; to:0.9 2.46 -2.9; loop:true; dir:alternate; dur:1300; easing:easeInOutSine"></a-sphere>
+  <a-sphere radius="0.007" position="-0.8 2.2 -2.9" material="color:#ffd700; emissive:#ffd700; emissiveIntensity:1; opacity:0.5; transparent:true"
+    animation="property:position; from:-0.8 2.2 -2.9; to:-0.8 2.26 -2.9; loop:true; dir:alternate; dur:1000; easing:easeInOutSine"></a-sphere>
+  <a-sphere radius="0.008" position="0.2 0.8 -2.9" material="color:#ff6eb4; emissive:#ff6eb4; emissiveIntensity:1; opacity:0.5; transparent:true"
+    animation="property:position; from:0.2 0.8 -2.9; to:0.2 0.86 -2.9; loop:true; dir:alternate; dur:1600; easing:easeInOutSine"></a-sphere>
+
+  <!-- ═══ PLAYER RIG ═══ -->
+  <a-entity id="rig" position="0 0 1.4">
+    <a-camera id="cam" look-controls wasd-controls="acceleration:25">
+      <!-- Desktop gaze cursor -->
+      <a-cursor id="gaze-cursor"
+        raycaster="objects: .color-swatch, .paintable; far: 20"
+        geometry="primitive:ring; radiusInner:0.007; radiusOuter:0.012"
+        material="color:white; shader:flat; opacity:0.75"
+        fuse="false">
+      </a-cursor>
+    </a-camera>
+
+    <!-- LEFT controller — palette/color selection laser -->
+    <a-entity id="left-ctrl"
+      oculus-touch-controls="hand:left"
+      laser-controls="hand:left"
+      raycaster="objects: .color-swatch, .paintable; far:20; lineColor:#aaaaff; lineOpacity:0.5">
+    </a-entity>
+
+    <!-- RIGHT controller — painting laser -->
+    <a-entity id="right-ctrl"
+      oculus-touch-controls="hand:right"
+      laser-controls="hand:right"
+      raycaster="objects: .color-swatch, .paintable; far:20; lineColor:#ffaaaa; lineOpacity:0.5">
+    </a-entity>
+  </a-entity>
+
+</a-scene>
+
+<script>
+// ══ AFRAME COMPONENT: keeps canvas texture synced every frame ══
+AFRAME.registerComponent('canvas-texture-updater', {
+  tick: function() {
+    const surface = document.getElementById('canvas-surface');
+    if (!surface) return;
+    const mesh = surface.getObject3D('mesh');
+    if (mesh && mesh.material && mesh.material.map) {
+      mesh.material.map.needsUpdate = true;
+    }
+  }
+});
+
+// ══ PAINT STATE ══════════════════════════════════════════════════════════════
+const canvas  = document.getElementById('paintCanvas');
+const ctx     = canvas.getContext('2d');
+
+// Fill white to start
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, 1024, 1024);
+
+let curColor  = '#ff2222';
+let brushSize = 18;
+let isPainting= false;
+let lastX     = null;
+let lastY     = null;
+let history   = [];   // ImageData snapshots
+const MAX_HIST= 24;
+
+const COLOR_MAP = {
+  'col-white':  '#ffffff', 'col-ltgray': '#aaaaaa', 'col-gray':   '#555555', 'col-black':  '#111111',
+  'col-red':    '#ff2222', 'col-orange': '#ff8800', 'col-yellow': '#ffee00', 'col-lime':   '#aaff00',
+  'col-green':  '#00cc44', 'col-teal':   '#00bbaa', 'col-cyan':   '#00ddff', 'col-sky':    '#44aaff',
+  'col-blue':   '#2255ff', 'col-indigo': '#4422cc', 'col-violet': '#8822ff', 'col-purple': '#cc44ff',
+  'col-pink':   '#ff44bb', 'col-hotpink':'#ff0080', 'col-rose':   '#ffaabb', 'col-brown':  '#884422',
+  'col-tan':    '#cc9966', 'col-gold':   '#ffcc00', 'col-silver': '#c0c8d8', 'col-neon':   '#39ff14',
+};
+const SIZE_MAP = { 'size-sm': 5, 'size-md': 16, 'size-lg': 30, 'size-xl': 50 };
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function saveSnap() {
+  if (history.length >= MAX_HIST) history.shift();
+  history.push(ctx.getImageData(0, 0, 1024, 1024));
+}
+
+function undo() {
+  if (history.length === 0) return;
+  ctx.putImageData(history.pop(), 0, 0);
+  flash('btn-undo');
+}
+
+function clearAll() {
+  saveSnap();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 1024, 1024);
+  flash('btn-clear');
+}
+
+function paintAt(u, v, newStroke) {
+  const x = u * 1024;
+  const y = (1 - v) * 1024;
+  if (newStroke) { saveSnap(); lastX = x; lastY = y; }
+  ctx.strokeStyle = curColor;
+  ctx.fillStyle   = curColor;
+  ctx.lineWidth   = brushSize;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  if (!newStroke && lastX !== null) {
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+  ctx.fill();
+  lastX = x; lastY = y;
+}
+
+function stopPaint() {
+  isPainting = false;
+  lastX = null; lastY = null;
+}
+
+function setColor(id) {
+  const c = COLOR_MAP[id];
+  if (!c) return;
+  curColor = c;
+  const prev = document.getElementById('color-preview');
+  if (prev) prev.setAttribute('material', `color:${c}; emissive:${c}; emissiveIntensity:0.7`);
+  const tip = document.getElementById('brush-tip');
+  if (tip) tip.setAttribute('material', `color:${c}; emissive:${c}; emissiveIntensity:0.9; opacity:0.85; transparent:true`);
+  pulse(id);
+}
+
+function setSize(id) {
+  const s = SIZE_MAP[id];
+  if (!s) return;
+  brushSize = s;
+  const tip = document.getElementById('brush-tip');
+  if (tip) tip.setAttribute('radius', Math.max(0.008, s / 1024 * 2.2));
+  pulse(id);
+}
+
+let _lastPulse = null;
+function pulse(id) {
+  if (_lastPulse) {
+    const old = document.getElementById(_lastPulse);
+    if (old) old.setAttribute('scale','1 1 1');
+  }
+  const el = document.getElementById(id);
+  if (el) el.setAttribute('scale','1.35 1.35 1.5');
+  _lastPulse = id;
+}
+
+function flash(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.setAttribute('scale','1.06 1.2 1.1');
+  setTimeout(() => el.setAttribute('scale','1 1 1'), 180);
+}
+
+// ── UI element click dispatcher ──────────────────────────────────────────────
+function handleUIClick(id) {
+  if (COLOR_MAP[id])  return setColor(id);
+  if (SIZE_MAP[id])   return setSize(id);
+  if (id === 'btn-undo')  return undo();
+  if (id === 'btn-clear') return clearAll();
+}
+
+// ── Canvas paint from raycaster UV ───────────────────────────────────────────
+function handleIntersect(evt) {
+  const inters = evt.detail.intersections || evt.detail.els;
+  // Use the raw THREE intersections from the raycaster component
+  const raycaster = evt.target.components.raycaster;
+  if (!raycaster) return;
+  const threeInters = raycaster.intersections;
+  if (!threeInters || threeInters.length === 0) return;
+
+  for (const inter of threeInters) {
+    if (!inter.object || !inter.object.el) continue;
+    const el = inter.object.el;
+
+    // Move brush tip to intersection point
+    const tip = document.getElementById('brush-tip');
+    if (tip && inter.point) {
+      tip.setAttribute('visible', 'true');
+      tip.setAttribute('position', `${inter.point.x} ${inter.point.y} ${inter.point.z}`);
+    }
+
+    // Paint on canvas surface
+    if (el.id === 'canvas-surface' && inter.uv) {
+      if (isPainting) {
+        paintAt(inter.uv.x, inter.uv.y, lastX === null);
+      }
+    }
+  }
+}
+
+function handleIntersectClear(evt) {
+  const tip = document.getElementById('brush-tip');
+  if (tip) tip.setAttribute('visible', 'false');
+  stopPaint();
+}
+
+// ── Scene loaded ──────────────────────────────────────────────────────────────
+document.getElementById('main-scene').addEventListener('loaded', () => {
+  const rightCtrl = document.getElementById('right-ctrl');
+  const leftCtrl  = document.getElementById('left-ctrl');
+
+  // Attach raycaster events
+  [rightCtrl, leftCtrl].forEach(ctrl => {
+    if (!ctrl) return;
+    ctrl.addEventListener('raycaster-intersection', handleIntersect);
+    ctrl.addEventListener('raycaster-intersection-cleared', handleIntersectClear);
+  });
+
+  // RIGHT controller — paint trigger
+  if (rightCtrl) {
+    rightCtrl.addEventListener('triggerdown', () => { isPainting = true; lastX = null; lastY = null; });
+    rightCtrl.addEventListener('triggerup', stopPaint);
+    rightCtrl.addEventListener('bbuttondown', undo);
+    rightCtrl.addEventListener('abuttondown', clearAll);
+    // Grip cycles brush size
+    const szIds = ['size-sm','size-md','size-lg','size-xl'];
+    let szIdx = 1;
+    rightCtrl.addEventListener('gripdown', () => { szIdx = (szIdx+1)%szIds.length; setSize(szIds[szIdx]); });
+  }
+
+  // LEFT controller — select colors / also can paint
+  if (leftCtrl) {
+    leftCtrl.addEventListener('triggerdown', () => {
+      // check if over a UI element first, then paint
+      const rc = leftCtrl.components.raycaster;
+      if (rc && rc.intersections.length > 0) {
+        const el = rc.intersections[0].object && rc.intersections[0].object.el;
+        if (el && el.id && (COLOR_MAP[el.id] || SIZE_MAP[el.id] || el.id === 'btn-undo' || el.id === 'btn-clear')) {
+          handleUIClick(el.id);
+          return;
+        }
+      }
+      isPainting = true; lastX = null; lastY = null;
+    });
+    leftCtrl.addEventListener('triggerup', stopPaint);
+    leftCtrl.addEventListener('ybuttondown', undo);
+    leftCtrl.addEventListener('xbuttondown', clearAll);
+  }
+
+  // Wire up all UI element clicks (laser pointer click = triggerdown on element)
+  document.querySelectorAll('.color-swatch').forEach(el => {
+    el.addEventListener('click', () => handleUIClick(el.id));
+  });
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-clear').addEventListener('click', clearAll);
+
+  // Desktop: paint by clicking on canvas with mouse
+  const surface = document.getElementById('canvas-surface');
+  if (surface) {
+    surface.addEventListener('mousedown', e => {
+      isPainting = true; lastX = null; lastY = null;
+      if (e.detail && e.detail.intersection && e.detail.intersection.uv) {
+        paintAt(e.detail.intersection.uv.x, e.detail.intersection.uv.y, true);
+      }
+    });
+    surface.addEventListener('mouseup', stopPaint);
+    surface.addEventListener('mouseleave', stopPaint);
+    surface.addEventListener('mousemove', e => {
+      if (!isPainting) return;
+      if (e.detail && e.detail.intersection && e.detail.intersection.uv) {
+        paintAt(e.detail.intersection.uv.x, e.detail.intersection.uv.y, false);
+      }
+    });
+  }
+
+  // Desktop swatch clicks
+  document.querySelectorAll('.color-swatch').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      if (COLOR_MAP[el.id] || SIZE_MAP[el.id]) {
+        el.setAttribute('scale','1.2 1.2 1.2');
+      }
+    });
+    el.addEventListener('mouseleave', () => {
+      if (el.id !== _lastPulse) el.setAttribute('scale','1 1 1');
+    });
+  });
+
+  // Tick: continuous painting while trigger held
+  document.getElementById('main-scene').addEventListener('tick', () => {
+    if (!isPainting) return;
+    [rightCtrl, leftCtrl].forEach(ctrl => {
+      if (!ctrl) return;
+      const rc = ctrl.components.raycaster;
+      if (!rc || !rc.intersections) return;
+      for (const inter of rc.intersections) {
+        if (inter.object && inter.object.el && inter.object.el.id === 'canvas-surface' && inter.uv) {
+          paintAt(inter.uv.x, inter.uv.y, false);
+          return;
+        }
+      }
+    });
+  });
+
+  // Init defaults
+  setColor('col-red');
+  setSize('size-md');
+  pulse('size-md');
+});
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'z') undo();
+  if (k === 'c') clearAll();
+  if (k === '1') setSize('size-sm');
+  if (k === '2') setSize('size-md');
+  if (k === '3') setSize('size-lg');
+  if (k === '4') setSize('size-xl');
+});
+
+// ── Enter studio ──────────────────────────────────────────────────────────────
+function enterStudio() {
+  document.getElementById('overlay').style.display = 'none';
+  const scene = document.getElementById('main-scene');
+  scene.style.display = 'block';
+  // On Quest, auto-click the Enter VR button
+  setTimeout(() => {
+    if (!scene.is('vr-mode')) {
+      const vrBtn = document.querySelector('.a-enter-vr-button');
+      if (vrBtn) vrBtn.click();
+    }
+  }, 800);
+}
+</script>
+</body>
+</html>
